@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: edugrade_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: edugrade
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d edugrade"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: edugrade_app
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_HOST=db
+      - DB_NAME=edugrade
+      - DB_USER=postgres
+      - DB_PASSWORD=postgrespassword
+      - SECRET_KEY=insecure-hardcoded-secret-key-edugrade-2026
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
