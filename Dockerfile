@@ -10,4 +10,5 @@ COPY --from=builder /install /usr/local
 COPY app/ .
 USER 10001
 EXPOSE 5000
+ENV APP_HOST=0.0.0.0
 CMD ["python", "app.py"]
