@@ -1,9 +1,7 @@
 .git
-.gitignore
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache
 .env
-venv
+docs
+k8s
+captures
+*.md
+*.pdf
