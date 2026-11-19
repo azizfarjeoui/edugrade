@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: edugrade, namespace: devsecops }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: edugrade } }
+  template:
+    metadata: { labels: { app: edugrade } }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: edugrade
+          image: ghcr.io/azizfarjeoui/edugrade:latest
+          ports: [{ containerPort: 5000 }]
+          env:
+            - { name: DB_HOST, value: postgres }
+            - { name: DB_NAME, value: edugrade }
+            - { name: DB_USER, value: edugrade }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-secret, key: POSTGRES_PASSWORD } }
+            - name: SECRET_KEY
+              valueFrom: { secretKeyRef: { name: db-secret, key: SECRET_KEY } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: edugrade, namespace: devsecops }
+spec:
+  selector: { app: edugrade }
+  ports: [{ port: 5000 }]
