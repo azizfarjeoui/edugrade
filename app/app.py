@@ -11,8 +11,11 @@ DB_NAME = os.environ.get("DB_NAME", "edugrade")
 DB_USER = os.environ.get("DB_USER", "postgres")
 DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
 
-# VULNERABILITY 4: Fake hardcoded fallback secret key
-SECRET_KEY = os.environ.get("SECRET_KEY", "insecure-hardcoded-secret-key-edugrade-2026")
+# SECURED: Read SECRET_KEY exclusively from environment variable (no fallback)
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    logger.error("FATAL: SECRET_KEY environment variable is required and must not be empty.")
+    sys.exit(1)
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
@@ -20,9 +23,10 @@ app.secret_key = SECRET_KEY
 BASE_STYLE = "<style>body{font-family:Arial,sans-serif;margin:30px;background:#f7f9fa}.card{background:#fff;padding:20px;border-radius:8px;max-width:700px;margin:auto}table{width:100%;border-collapse:collapse;margin-top:15px}th,td{border:1px solid #ddd;padding:8px}input{width:100%;padding:8px;margin:8px 0;box-sizing:border-box}button{background:#0066cc;color:#fff;padding:8px 16px;border:none;border-radius:4px;cursor:pointer}.alert{color:red}</style>"
 LOGIN_HTML = BASE_STYLE + """<div class="card"><h2>EduGrade - Login</h2>{% if error %}<div class="alert">{{ error }}</div>{% endif %}
 <form method="POST"><label>Username</label><input type="text" name="username" required><label>Password</label><input type="password" name="password" required><button type="submit">Sign In</button></form></div>"""
+# SECURED: Output is auto-escaped by Jinja2 (no |safe filter)
 SEARCH_HTML = BASE_STYLE + """<div class="card"><p><b>EduGrade</b> | User: <b>{{ session.get('username') }}</b> ({{ session.get('role') }}) | <a href="/logout">Logout</a></p>
 <h3>Search Student Grades</h3><form method="GET"><input type="text" name="q" value="{{ q_val }}" placeholder="Subject (e.g. Math, DevSecOps)"><button type="submit">Search</button></form>
-{% if searched %}<!-- VULNERABILITY 3: Reflected XSS (q printed unescaped) --><h4>Search results for: {{ q_raw|safe }}</h4>
+{% if searched %}<h4>Search results for: {{ q_val }}</h4>
 <table><tr><th>ID</th><th>Student</th><th>Subject</th><th>Grade</th><th>Comment</th><th>Action</th></tr>
 {% for g in grades %}<tr><td>{{ g.id }}</td><td>{{ g.username }}</td><td>{{ g.subject }}</td><td>{{ g.grade }}</td><td>{{ g.comment }}</td><td><a href="/grades/{{ g.id }}">View</a></td></tr>{% endfor %}</table>{% endif %}</div>"""
 GRADE_HTML = BASE_STYLE + """<div class="card"><p><a href="/search">&larr; Back to Search</a> | <a href="/logout">Logout</a></p>
@@ -97,6 +101,7 @@ def search():
     if "user_id" not in session:
         return redirect(url_for("login"))
     q, ip = request.args.get("q", ""), request.remote_addr or "127.0.0.1"
+    # Keep SECURITY_ALERT logging for suspicious input telemetry
     if any(pat in q.upper() for pat in ["'", "--", "UNION"]):
         logger.warning(f"SECURITY_ALERT type=sqli_attempt ip={ip}")
     grades = []
@@ -104,14 +109,13 @@ def search():
         logger.info(f"Search query executed: q_len={len(q)} user={session.get('username')} ip={ip}")
         conn = get_db()
         cur = conn.cursor()
-        # VULNERABILITY 1: SQL Injection via string concatenation
-        query = f"SELECT g.id, u.username, g.subject, g.grade, g.comment FROM grades g JOIN users u ON g.student_id = u.id WHERE g.subject ILIKE '%{q}%'"
-        cur.execute(query)
+        # SECURED: Parameterized SQL query preventing injection
+        query = "SELECT g.id, u.username, g.subject, g.grade, g.comment FROM grades g JOIN users u ON g.student_id = u.id WHERE g.subject ILIKE %s"
+        cur.execute(query, (f"%{q}%",))
         grades = cur.fetchall()
         cur.close()
         conn.close()
-    # VULNERABILITY 3: Reflected XSS passed via q_raw
-    return render_template_string(SEARCH_HTML, q_raw=q, q_val=q, searched=bool(q), grades=grades)
+    return render_template_string(SEARCH_HTML, q_val=q, searched=bool(q), grades=grades)
 
 @app.route("/grades/<int:grade_id>")
 def grade_detail(grade_id):
@@ -121,12 +125,17 @@ def grade_detail(grade_id):
     logger.info(f"Grade detail accessed: grade_id={grade_id} user={session.get('username')} ip={ip}")
     conn = get_db()
     cur = conn.cursor()
-    # VULNERABILITY 2: Insecure Direct Object Reference (IDOR) - no ownership check
     cur.execute("SELECT g.id, g.student_id, u.username, g.subject, g.grade, g.comment FROM grades g JOIN users u ON g.student_id = u.id WHERE g.id = %s", (grade_id,))
     grade = cur.fetchone()
     cur.close()
     conn.close()
-    return render_template_string(GRADE_HTML, grade=grade) if grade else ("Grade record not found", 404)
+    if not grade:
+        return "Grade record not found", 404
+    # SECURED: Ownership & role authorization check (IDOR mitigation)
+    if session.get("role") != "teacher" and grade["student_id"] != session.get("user_id"):
+        logger.warning(f"SECURITY_ALERT type=unauthorized_access user={session.get('username')} grade_id={grade_id} ip={ip}")
+        return "Forbidden: You are not authorized to view this grade record", 403
+    return render_template_string(GRADE_HTML, grade=grade)
 
 @app.route("/health")
 def health():
@@ -135,5 +144,5 @@ def health():
 
 if __name__ == "__main__":
     init_db()
-    # VULNERABILITY 4: debug=True enabled in execution
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # SECURED: Debug mode explicitly disabled in production
+    app.run(host="0.0.0.0", port=5000, debug=False)

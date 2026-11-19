@@ -2,6 +2,9 @@ import os
 import sys
 import unittest
 
+# Ensure SECRET_KEY is set in environment for testing
+os.environ.setdefault("SECRET_KEY", "testing-secret-key-edugrade-env-variable-123456")
+
 # Add app directory to sys.path so app can be imported
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "app")))
 from app import app
@@ -32,6 +35,12 @@ class EduGradeStandaloneTests(unittest.TestCase):
     def test_index_unauthenticated_redirect(self):
         """Verify GET / redirects unauthenticated visitor to /login."""
         response = self.client.get("/")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/login"))
+
+    def test_unauthenticated_access_grades_redirects(self):
+        """Verify accessing /grades/<id> without login redirects to /login."""
+        response = self.client.get("/grades/1")
         self.assertEqual(response.status_code, 302)
         self.assertTrue(response.headers["Location"].endswith("/login"))
 

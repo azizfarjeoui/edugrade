@@ -30,7 +30,7 @@ services:
       - DB_NAME=edugrade
       - DB_USER=postgres
       - DB_PASSWORD=postgrespassword
-      - SECRET_KEY=insecure-hardcoded-secret-key-edugrade-2026
+      - SECRET_KEY=${SECRET_KEY:-edugrade-production-secure-key-9988776655}
     depends_on:
       db:
         condition: service_healthy
